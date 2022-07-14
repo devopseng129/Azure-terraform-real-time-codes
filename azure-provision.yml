@@ -1,0 +1,66 @@
+---
+- hosts: all
+  become: true
+  gather_facts: True
+  become_user: root
+  
+  tasks:
+  - name: Include etcd base vars 
+    include_vars: etcd-vars.yml
+  - name: Install etcd and update ubuntu packages
+    apt:
+      name: etcd-server
+      state: present
+      update-cache: yes
+  - name: Install tls files from secrets
+    ansible.builtin.copy:
+      src: ./revmed.com/revmed.com_wildcard_cert
+      dest: /etc/pki/revmed.com_wildcard_cert
+      owner: root
+      group:
+        mode: 600
+  - name:  Install tls files from secrets
+    ansible.builtin.copy:
+      src: ./revmed.com/revmed.com_wildcard_cert.key
+      dest: /etc/pki/revmed.com_wildcard_cert.key
+      owner: root
+      group:
+        mode: 600
+  - name: write config file /etc/default/etcd.conf
+    ansible.builtin.template:
+      src: etcd.j2
+      dest: /etc/default/etcd.conf
+      owner: root
+      group: root
+      mode: '0644'
+  - name: Install azcopy
+    src: "{{ azcopy_path }}"
+    dest: /usr/local/bin
+    mode: 0755
+    remote_src: yes
+    exclude:
+      - ThirdPartyNotice.txt
+      - NOTICE.txt
+    extra_opts: [ --strp-components=1 ]
+  - name: install azure credential
+    ansible.builtin.copy:
+      src: Azure_prod_subscription_key
+      dest: /etc/pki/Azure_prod_subscription_key
+      owner: root
+      group:
+        mode: 600
+  - name: backup cron job for etcd-server
+    ansible.bultin.cron:
+      name: "etcd cron copy"
+      special_time: daily
+      user:
+        job: "mkdir /tmp/etcd-backup && cd /tmp/etcd-backup && etcdctl snapshot save backup.db-`date +%d/%m/%Y\ %H:%M:%S` && azcopy copy '/tmp/etcd-backup' '{{ SAS_TOKEN_URL}}' --recursive=true "
+  - name: enable etcd and restart after the config is setup.
+    systemd:
+      name: etcd
+      state: restarted
+      enabled: True
+  - name: Update all the packages on the machine
+    apt: 
+    name: "*"
+    state: latest
